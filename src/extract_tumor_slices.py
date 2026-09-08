@@ -172,6 +172,17 @@ def build_tumor_mask_volume(rtstruct, roi_number, ct_files, sop_uid_by_z, volume
     num_slices, rows, cols = volume_shape
     mask_volume = np.zeros((num_slices, rows, cols), dtype=bool)
 
+    # A slice usually carries several contour loops, and every one of them
+    # needs the same ImagePositionPatient / PixelSpacing to map world mm to
+    # pixels. Read each CT header once and keep it, instead of re-reading the
+    # file per contour — that re-read dominates runtime over a full dataset.
+    header_cache = {}
+
+    def ct_header(uid):
+        if uid not in header_cache:
+            header_cache[uid] = pydicom.dcmread(ct_files[uid], stop_before_pixels=True)
+        return header_cache[uid]
+
     any_contour = False
     for roi_contour in rtstruct.ROIContourSequence:
         if roi_contour.ReferencedROINumber != roi_number:
@@ -189,8 +200,7 @@ def build_tumor_mask_volume(rtstruct, roi_number, ct_files, sop_uid_by_z, volume
             z_idx = sop_to_z[ref_uid]
             flat = np.array(contour.ContourData, dtype=float).reshape(-1, 3)
 
-            ct_ds = pydicom.dcmread(ct_files[ref_uid], stop_before_pixels=True)
-            px = world_to_pixel(flat, ct_ds)
+            px = world_to_pixel(flat, ct_header(ref_uid))
 
             if len(px) < 3:
                 continue
